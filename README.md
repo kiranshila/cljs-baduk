@@ -1,4 +1,4 @@
-# Go for ClojureScript
+# Baduk for ClojureScript
 
 ![Go](Go.png)
 
