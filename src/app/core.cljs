@@ -4,7 +4,8 @@
             [app.stones :as stones]
             [clojure.set :as set]))
 
-(def board-size 19)
+(def board-size
+9)
 
 (def next-player-color (r/atom :black))
 
