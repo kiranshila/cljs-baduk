@@ -91,7 +91,7 @@
           (swap! game-history append-history current-color location)
           (reset! stone-locations removed-locations)
           (swap! next-player-color other-color)
-          (reset! last-stone-locations removed-locations))))))
+          (reset! last-stone-locations locations))))))
 
 (defn board-svg [board-size]
   [:svg {:viewBox [0 0 (dec board-size) (dec board-size)]
