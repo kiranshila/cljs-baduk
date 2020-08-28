@@ -1,13 +1,14 @@
-(ns app.core
+(ns baduk.core
   (:require [reagent.core :as r]
             [reagent.dom :as rdom]
-            [app.stones :as stones]
+            [baduk.stones :as stones]
             [clojure.set :as set]))
 
-(def board-size
-9)
+(def board-size 9)
 
-(def next-player-color (r/atom :black))
+(defonce next-player-color (r/atom :black))
+
+(defonce game-history (r/atom []))
 
 (def other-color {:white :black
                   :black :white})
@@ -15,10 +16,12 @@
 (def color-to-hover {:white "url(#white-stone-image)"
                      :black "url(#black-stone-image)"})
 
-(def stone-locations (r/atom {:white #{}
-                              :black #{}}))
+(defonce stone-locations (r/atom {}))
 
-(def last-stone-locations (r/atom nil))
+(defonce last-stone-locations (r/atom nil))
+
+(defonce captured (r/atom {:white 0
+                           :black 0}))
 
 (defn get-adjacent-locations [[x y]]
   (->> (for [[dx dy] [[-1 0] [0 1] [1 0] [0 -1]]
@@ -30,18 +33,16 @@
        (into #{})))
 
 (defn empty-location? [locations location]
-  (not (or (contains? (:white locations) location)
-           (contains? (:black locations) location))))
+  (not (locations location)))
 
 (defn has-liberty? [locations location]
   (let [adjacents (get-adjacent-locations location)]
     (some (partial empty-location? locations) adjacents)))
 
 (defn neighbors [locations location]
-  (let [adjacents (get-adjacent-locations location)]
-    (if (contains? (:white locations) location)
-      (set/intersection adjacents (:white locations))
-      (set/intersection adjacents (:black locations)))))
+  (let [adjacents (get-adjacent-locations location)
+        color (locations location)]
+    (into #{} (filter #(= color (locations %))) adjacents)))
 
 (defn get-group [locations location]
   (if (empty-location? locations location)
@@ -66,24 +67,31 @@
         (cond
           (empty? group) (recur locations adjacents)
           (alive? locations group) (recur locations adjacents)
-          :finally (-> locations
-                       (update :white set/difference group)
-                       (update :black set/difference group)
-                       (recur adjacents))))
+          :finally (recur (into {}
+                                (filter #(not (contains? group (first %))))
+                                locations)
+                          adjacents)))
       locations)))
+
+(defn append-history [history color location]
+  (conj history {color location}))
 
 (defn handle-new-stone [x y]
   (let [locations @stone-locations
         location [x y]
-        new-locations (update locations @next-player-color conj location)
-        adjacents (get-adjacent-locations location)]
+        locations-plus-stone (assoc locations location @next-player-color)
+        adjacents (get-adjacent-locations location)
+        current-color @next-player-color]
     (when (empty-location? locations location)
-      (let [new-locations (remove-dead-groups-around new-locations location)]
-        (when (and (not= @last-stone-locations new-locations)
-                   (alive? new-locations (get-group new-locations location)))
-          (reset! stone-locations new-locations)
+      (let [removed-locations (remove-dead-groups-around locations-plus-stone location)]
+        (when (and (not= @last-stone-locations removed-locations)
+                   (alive? removed-locations (get-group removed-locations location)))
+          (swap! captured update current-color + (- (count locations-plus-stone)
+                                                    (count removed-locations)))
+          (swap! game-history append-history current-color location)
+          (reset! stone-locations removed-locations)
           (swap! next-player-color other-color)
-          (reset! last-stone-locations locations))))))
+          (reset! last-stone-locations removed-locations))))))
 
 (defn board-svg [board-size]
   [:svg {:viewBox [0 0 (dec board-size) (dec board-size)]
@@ -108,8 +116,7 @@
                           :y (- y 0.5)
                           :on-click #(handle-new-stone x y)}])
    ; Draw the current board state stones
-   (for [[color stones] @stone-locations
-         stone stones]
+   (for [[stone color] @stone-locations]
      (stones/stone color stone))])
 
 (defn goban []

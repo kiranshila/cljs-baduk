@@ -1,4 +1,4 @@
-(ns app.stones)
+(ns baduk.stones)
 
 
 (def color-to-url {:black "url(#black-stone-gradient)"
