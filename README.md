@@ -1,6 +1,6 @@
-# Go for ClojureScript
+# Baduk for ClojureScript
 
 ![Go](Go.png)
 
-A quick implementation of the board game Go, written in ClojureScript with Reagent.
+A quick implementation of the board game Baduk/Go, written in ClojureScript with Reagent.
 Currently, the game logic works, but not scoring (that's the hard part).
