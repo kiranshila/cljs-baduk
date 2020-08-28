@@ -126,7 +126,8 @@
                        :position "relative"
                        :box-shadow "4px 4px 10px #000000"}}
    [:div.Grid {:style {:margin "50px"
-                       :position "absolute"}}
+                       :position "absolute"
+                       :width "700px"}}
     [board-svg board-size]]])
 
 (defn app []
