@@ -72,6 +72,7 @@
         (cond
           (empty? group) (recur locations adjacents)
           (alive? locations group) (recur locations adjacents)
+          (contains? group location) (recur locations adjacents)
           :finally (recur (into {}
                                 (filter #(not (contains? group (first %))))
                                 locations)
