@@ -4,11 +4,12 @@
             [baduk.stones :as stones]
             [clojure.set :as set]))
 
-(def board-size 9)
+(defonce board-size (r/atom nil))
 
 (defonce next-player-color (r/atom :black))
 
 (defonce game-history (r/atom []))
+(defonce game-started? (r/atom nil))
 
 (def other-color {:white :black
                   :black :white})
@@ -29,13 +30,14 @@
                            :black 0}))
 
 (defn get-adjacent-locations [[x y]]
-  (->> (for [[dx dy] [[-1 0] [0 1] [1 0] [0 -1]]
-             :let [x (+ x dx)
-                   y (+ y dy)]
-             :when (and (<= 0 x (dec board-size))
-                        (<= 0 y (dec board-size)))]
-         [x y])
-       (into #{})))
+  (let [size @board-size]
+    (->> (for [[dx dy] [[-1 0] [0 1] [1 0] [0 -1]]
+               :let [x (+ x dx)
+                     y (+ y dy)]
+               :when (and (<= 0 x (dec size))
+                          (<= 0 y (dec size)))]
+           [x y])
+         (into #{}))))
 
 (defn empty-location? [locations location]
   (not (locations location)))
@@ -130,22 +132,24 @@
      (stones/stone color stone))])
 
 (defn goban []
-  [:div.Goban {:style {:width "800px"
-                       :height "800px"
-                       :background-image "url(static/woodgrain.jpg)"
-                       :position "relative"
-                       :box-shadow "4px 4px 10px #000000"}}
-   [:div.Grid {:style {:margin "50px"
-                       :position "absolute"
-                       :width "700px"}}
-    [board-svg board-size]]])
+  (when @game-started?
+    [:div.Goban {:style {:width "800px"
+                        :height "800px"
+                        :background-image "url(static/woodgrain.jpg)"
+                        :position "relative"
+                        :box-shadow "4px 4px 10px #000000"}}
+    [:div.Grid {:style {:margin "50px"
+                        :position "absolute"
+                        :width "700px"}}
+     [board-svg @board-size]]]))
 
 (defn toggle-game-mode []
-  [:div
-   (str "Current game mode- " @game-mode " ")
-   [:input {:type "button"
-            :value "Toggle game mode"
-            :on-click #(swap! game-mode other-game-mode)}]])
+  (when @game-started?
+    [:div
+    (str "Current game mode- " @game-mode " ")
+    [:input {:type "button"
+             :value "Toggle game mode"
+             :on-click #(swap! game-mode other-game-mode)}]]))
 
 (defn reset []
   (reset! next-player-color :black)
@@ -155,11 +159,12 @@
   (reset! captured {:white 0 :black 0}))
 
 (defn reset-game []
-  [:div
-   "Reset game "
-   [:input {:type "button"
-            :value "Reset game"
-            :on-click #(reset)}]])
+  (when @game-started?
+    [:div
+    "Reset game "
+    [:input {:type "button"
+             :value "Reset game"
+             :on-click #(reset)}]]))
 
 (defn toggle-next-color []
   (when (= @game-mode :place)
@@ -171,7 +176,8 @@
      [:br]]))
 
 (defn pass []
-  (when (= @game-mode :play)
+  (when (and (= @game-mode :play)
+             @game-started?)
     [:div
      "Pass turn"
      [:input {:type "button"
@@ -179,8 +185,24 @@
               :on-click #(swap! next-player-color other-color)}]
      [:br]]))
 
+(defn select-board-size []
+  (reset! board-size (int (.. js/document (getElementById "board-size") -value)))
+  (reset! game-started? true))
+
+(defn start-game []
+  (when-not @game-started?
+    [:div "Select board size: "
+     [:select {:name "board-size" :id "board-size"}
+      [:option {:value 9} "9x9"]
+      [:option {:value 13} "13x13"]
+      [:option {:value 19} "19x19"]]
+     [:input {:type "button"
+              :value "Submit"
+              :on-click select-board-size}]]))
+
 (defn app []
   [:div
+   [start-game]
    [goban]
    [:br]
    [:br]
