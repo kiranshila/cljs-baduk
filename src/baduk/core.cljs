@@ -13,8 +13,13 @@
 (def other-color {:white :black
                   :black :white})
 
+(def other-game-mode {:play :place
+                      :place :play})
+
 (def color-to-hover {:white "url(#white-stone-image)"
                      :black "url(#black-stone-image)"})
+
+(defonce game-mode (r/atom :play))
 
 (defonce stone-locations (r/atom {}))
 
@@ -73,25 +78,29 @@
                           adjacents)))
       locations)))
 
-(defn append-history [history color location]
-  (conj history {color location}))
+(defn append-history [history color mode location]
+  (conj history {{color mode} location}))
 
 (defn handle-new-stone [x y]
   (let [locations @stone-locations
         location [x y]
-        locations-plus-stone (assoc locations location @next-player-color)
-        adjacents (get-adjacent-locations location)
-        current-color @next-player-color]
-    (when (empty-location? locations location)
-      (let [removed-locations (remove-dead-groups-around locations-plus-stone location)]
-        (when (and (not= @last-stone-locations removed-locations)
-                   (alive? removed-locations (get-group removed-locations location)))
-          (swap! captured update current-color + (- (count locations-plus-stone)
-                                                    (count removed-locations)))
-          (swap! game-history append-history current-color location)
-          (reset! stone-locations removed-locations)
-          (swap! next-player-color other-color)
-          (reset! last-stone-locations locations))))))
+        current-color @next-player-color
+        locations-plus-stone (assoc locations location current-color)]
+    (if (= :play @game-mode)
+      (let [adjacents (get-adjacent-locations location)]
+        (when (empty-location? locations location)
+          (let [removed-locations (remove-dead-groups-around locations-plus-stone location)]
+            (when (and (not= @last-stone-locations removed-locations)
+                       (alive? removed-locations (get-group removed-locations location)))
+              (swap! captured update current-color + (- (count locations-plus-stone)
+                                                        (count removed-locations)))
+              (swap! game-history append-history current-color :play location)
+              (reset! stone-locations removed-locations)
+              (swap! next-player-color other-color)
+              (reset! last-stone-locations locations)))))
+      (do
+        (swap! game-history append-history current-color :place location)
+        (reset! stone-locations locations-plus-stone)))))
 
 (defn board-svg [board-size]
   [:svg {:viewBox [0 0 (dec board-size) (dec board-size)]
@@ -130,8 +139,55 @@
                        :width "700px"}}
     [board-svg board-size]]])
 
+(defn toggle-game-mode []
+  [:div
+   (str "Current game mode- " @game-mode " ")
+   [:input {:type "button"
+            :value "Toggle game mode"
+            :on-click #(swap! game-mode other-game-mode)}]])
+
+(defn reset []
+  (reset! next-player-color :black)
+  (reset! game-history [])
+  (reset! last-stone-locations nil)
+  (reset! stone-locations {})
+  (reset! captured {:white 0 :black 0}))
+
+(defn reset-game []
+  [:div
+   "Reset game "
+   [:input {:type "button"
+            :value "Reset game"
+            :on-click #(reset)}]])
+
+(defn toggle-next-color []
+  (when (= @game-mode :place)
+    [:div
+     (str "Toggle stone color- " @next-player-color " ")
+     [:input {:type "button"
+              :value "Toggle"
+              :on-click #(swap! next-player-color other-color)}]
+     [:br]]))
+
+(defn pass []
+  (when (= @game-mode :play)
+    [:div
+     "Pass turn"
+     [:input {:type "button"
+              :value "Pass"
+              :on-click #(swap! next-player-color other-color)}]
+     [:br]]))
+
 (defn app []
-  (goban))
+  [:div
+   [goban]
+   [:br]
+   [:br]
+   [toggle-game-mode]
+   [:br]
+   [toggle-next-color]
+   [pass]
+   [reset-game]])
 
 (defn ^:dev/after-load start []
   (.log js/console "Starting app")
