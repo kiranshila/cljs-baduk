@@ -1,0 +1,9 @@
+{:paths ["src" "resources"]
+ :deps {thheller/shadow-cljs {:mvn/version "2.11.1"}
+        reagent/reagent {:mvn/version "1.0.0-alpha2"
+                 :exclusions [cljsjs/react cljsjs/react-dom]}
+        ring/ring-core {:mvn/version "1.8.1"}
+        org.clojure/clojure {:mvn/version "1.10.1" }
+        ring/ring-jetty-adapter {:mvn/version "1.8.1"}
+        metosin/reitit {:mvn/version "0.5.5"}
+        cljs-http/cljs-http {:mvn/version "0.1.46"}}}
