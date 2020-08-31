@@ -1,9 +1,11 @@
 node_modules/
 public/js
-
+.cpcache
 /target
 /checkouts
 /src/gen
+resources/public
+resources/js
 
 pom.xml
 pom.xml.asc

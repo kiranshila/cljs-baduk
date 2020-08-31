@@ -3,13 +3,19 @@
             [reagent.dom :as rdom]
             [baduk.stones :as stones]
             [baduk.logic :as logic]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [cljs.core.async :refer [<!]]
+            [cljs-http.client :as http])
+  (:require-macros
+   [cljs.core.async.macros :refer [go]]))
 
 (def other-game-mode {:play :place
                       :place :play})
 
 (def color-to-hover {:white "url(#white-stone-image)"
                      :black "url(#black-stone-image)"})
+
+(defonce multiplayer (r/atom nil))
 
 (defonce state (r/atom {:board-size nil
                         :next-player-color :black
@@ -20,6 +26,20 @@
                         :last-stone-locations nil
                         :captured {:white 0
                                    :black 0}}))
+
+(defn request-new-game! []
+  (let [board-size (int (.. js/document
+                            (getElementById "board-size")
+                            -value))
+        starting-color (.. js/document
+                           (getElementById "start-color")
+                           -value)]
+    (go (let [body (:body (<! (http/get "/api/new-game"
+                                        {:accept "application/edn"
+                                         :query-params {"board-size" board-size
+                                                        "starting-color" starting-color}})))]
+          (reset! multiplayer (:multiplayer body))
+          (reset! state (:state body))))))
 
 (defn board-svg []
   (let [{color :next-player-color
@@ -115,23 +135,44 @@
                 :on-click next-player!}]
        [:br]])))
 
-(defn select-board-size! []
+(defn start-local-game! []
   (swap! state merge {:board-size (int (.. js/document
                                            (getElementById "board-size")
                                            -value))
+                      :next-player-color (keyword (.. js/document
+                                                      (getElementById "start-color")
+                                                      -value))
                       :game-started? true}))
 
 (defn start-game []
   (let [{:keys [game-started?]} @state]
     (when-not game-started?
-      [:div "Select board size: "
-       [:select {:name "board-size" :id "board-size"}
-        [:option {:value 9} "9x9"]
-        [:option {:value 13} "13x13"]
-        [:option {:value 19} "19x19"]]
-       [:input {:type "button"
-                :value "Submit"
-                :on-click select-board-size!}]])))
+      [:div
+       [:div "Select board mode: "
+        [:select {:name "board-mode" :id "board-mode"}
+         [:option "Planar"]]]
+       [:br]
+       [:div "Select board size: "
+        [:select {:name "board-size" :id "board-size"}
+         [:option {:value 9} "9x9"]
+         [:option {:value 13} "13x13"]
+         [:option {:value 19} "19x19"]]]
+       [:br]
+       [:div "Select your starting color: "
+        [:select {:name "start-color" :id "start-color"}
+         [:option {:value "black"} "Black"]
+         [:option {:value "white"} "White"]]]
+       [:br]
+       [:div
+        [:input {:type "button" :value "Request game code" :on-click request-new-game!}]
+        " "
+        [:input {:type "button" :value "Start local game" :on-click start-local-game!}]]
+       [:br]
+       [:br]
+       [:br]
+       [:div "Join game "
+        [:input {:type "text"}]]
+       [:input {:type "button" :value "Join" :id "game-code"}]])))
 
 (defn app []
   [:div

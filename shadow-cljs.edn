@@ -1,8 +1,7 @@
-{:source-paths ["src"]
- :dependencies [[reagent "1.0.0-alpha2" :exclusions [cljsjs/react cljsjs/react-dom]]]
+{:source-paths []
+ :deps true
  :builds {:baduk {:target :browser
-                  :output-dir "public/js"
-                  :asset-path "js"
+                  :output-dir "resources/public/js"
+                  :asset-path "resources/js"
                   :modules {:main {:init-fn baduk.core/main}}
-                  :devtools {:http-root "public"
-                             :http-port 3000}}}}
+                  :devtools {}}}}
