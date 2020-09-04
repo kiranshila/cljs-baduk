@@ -4,10 +4,30 @@
             [baduk.stones :as stones]
             [baduk.logic :as logic]
             [clojure.set :as set]
-            [cljs.core.async :refer [<!]]
-            [cljs-http.client :as http])
+            [cljs.core.async :as a]
+            [taoensso.sente :as sente :refer [cb-success?]]
+            [taoensso.sente.packers.transit :as sente-transit]
+            [ajax.core :as ajax])
   (:require-macros
-   [cljs.core.async.macros :refer [go]]))
+   [cljs.core.async.macros :refer [go go-loop]]))
+
+(def ?csrf-token
+  (when-let [el (.getElementById js/document "sente-csrf-token")]
+    (.getAttribute el "data-csrf-token")))
+
+;; WS Setup
+(let [{:keys [chsk ch-recv send-fn state]}
+      (sente/make-channel-socket-client!
+       "/chsk"
+       ?csrf-token
+       {:type :auto
+        :packer (sente-transit/get-transit-packer)})]
+  (def chsk       chsk)
+  (def ch-chsk    ch-recv)
+  (def chsk-send! send-fn)
+  (def chsk-state state))
+
+;; Game stuff
 
 (def other-game-mode {:play :place
                       :place :play})
@@ -27,19 +47,30 @@
                         :captured {:white 0
                                    :black 0}}))
 
+(defn post
+  "POST to the server, transit all the way, do async things, give CSRF token"
+  [endpoint params]
+  (let [chan (a/chan)]
+    (ajax/POST endpoint
+      {:handler #(go (a/>! chan %))
+       :params params
+       :headers {:x-csrf-token ?csrf-token}
+       :response-format :transit})
+    chan))
+
 (defn request-new-game! []
   (let [board-size (int (.. js/document
                             (getElementById "board-size")
                             -value))
-        starting-color (.. js/document
-                           (getElementById "start-color")
-                           -value)]
-    (go (let [body (:body (<! (http/get "/api/new-game"
-                                        {:accept "application/edn"
-                                         :query-params {"board-size" board-size
-                                                        "starting-color" starting-color}})))]
-          (reset! multiplayer (:multiplayer body))
-          (reset! state (:state body))))))
+        starting-color (keyword (.. js/document
+                                    (getElementById "start-color")
+                                    -value))]
+    (go (let [{game :game} (a/<! (post "/new-game" {:board-size board-size
+                                            :starting-color starting-color}))]
+          (reset! multiplayer (:multiplayer game))
+          (reset! state (:state game))))))
+
+;; Frontend
 
 (defn board-svg []
   (let [{color :next-player-color
