@@ -49,8 +49,9 @@
                :captured {:white 0
                           :black 0}}
         multiplayer {:color starting-color
-                     :game-code game-code}]
-    (swap! game-sessions assoc game-code #{client-id})
+                     :game-code game-code
+                     :your-turn? (= starting-color :black)}]
+    (swap! game-sessions assoc game-code {client-id starting-color})
     (swap! games assoc game-code state)
     {:state state :multiplayer multiplayer}))
 
@@ -80,23 +81,39 @@
     (println "New Stone Event from: " client-id " at location " location " for game-code " game-code)
     (when ?reply-fn
       (swap! games update game-code logic/handle-new-stone x y)
-      (chsk-send! (first (disj (@game-sessions game-code) client-id)) [::new-state {:state (@games game-code)}])
+      (if-let [other-user-id (-> (@game-sessions game-code)
+                                 (dissoc client-id)
+                                 first
+                                 first)]
+        (chsk-send! other-user-id [::new-state {:state (@games game-code)}]))
       (?reply-fn (@games game-code)))))
 
 (defmethod -handle-ws-event :baduk.core/join-game [{:as ev-msg :keys [?data ?reply-fn client-id]}]
   (let [{:keys [game-code]} ?data]
     (when ?reply-fn
       (when-let [state (@games game-code)]
-        (if (= (count (@game-sessions game-code)) 1)
-          (do
-            (swap! game-sessions update game-code conj client-id)
-            (?reply-fn {:join? true :state state}))
-          (?reply-fn {:join? false}))))))
+        (let [sessions (@game-sessions game-code)
+              color (logic/other-color (second (first sessions)))]
+          (if (= (count sessions) 1)
+            (do
+              (swap! game-sessions update game-code conj {client-id color})
+              (println "Client: " client-id " joining game as " color)
+              (?reply-fn {:state state :multiplayer {:color color
+                                                     :game-code game-code
+                                                     :your-turn? (= color :black)}}))
+            (?reply-fn {})))))))
 
 (defmethod -handle-ws-event :baduk.core/new-game [{:as ev-msg :keys [?data ?reply-fn client-id]}]
   (let [{:keys [starting-color board-size]} ?data]
     (when ?reply-fn
       (?reply-fn (init-game! board-size starting-color client-id)))))
+
+(defmethod -handle-ws-event :baduk.core/pass [{:keys [client-id ?data]}]
+  (println "Client: " client-id " passes")
+  (let [{:keys [game-code]} ?data]
+    (swap! games update-in [game-code :next-player-color] logic/other-color)
+    (doseq [[client color] (@game-sessions game-code)]
+      (chsk-send! client [::new-state {:state (@games game-code)}]))))
 
 (defn handle-ws-event [{:as ev-msg :keys [id ?data event]}]
   (-handle-ws-event ev-msg))

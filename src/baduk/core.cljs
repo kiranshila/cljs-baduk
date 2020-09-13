@@ -42,9 +42,14 @@
 
 (defmulti push-event-handler first)
 (defmethod push-event-handler :baduk.server/new-state
-   [[id payload]]
+  [[id payload]]
   (let [{new-state :state} payload]
+    (if (= (:color @multiplayer) (:next-player-color new-state))
+      (swap! multiplayer update :your-turn? not))
     (reset! state new-state)))
+(defmethod push-event-handler :default
+  [[id payload]]
+  (println "Got unhandled push event: " id))
 
 (defmulti -event-msg-handler
   "Multimethod to handle Sente `event-msg`s"
@@ -63,7 +68,6 @@
 
 (defmethod -event-msg-handler :chsk/recv
   [{:as ev-msg :keys [?data]}]
-  (println "Push event from server: " ?data)
   (push-event-handler ?data))
 
 (defmethod -event-msg-handler :chsk/handshake
@@ -87,7 +91,6 @@
 (def color-to-hover {:white "url(#white-stone-image)"
                      :black "url(#black-stone-image)"})
 
-
 (defn request-new-game! []
   (let [board-size (int (.. js/document
                             (getElementById "board-size")
@@ -109,21 +112,23 @@
                       -value)]
     (chsk-send! [::join-game {:game-code game-code}]
                 ws-timeout
-                (fn [reply]
-                  (if (:join? reply)
+                (fn [{mp :multiplayer
+                      s :state}]
+                  (if (and mp s)
                     (do
-                      (reset! state (:state reply))
-                      (reset! multiplayer {:game-code game-code
-                                           :color :black}))
+                      (reset! state s)
+                      (reset! multiplayer mp))
                     (js/alert "No valid game code"))))))
 
 (defn new-stone-action! [x y]
   (if-let [mp @multiplayer]
-    (chsk-send! [::place-stone (merge mp {:location [x y]})]
-                ws-timeout
-                (fn [new-state]
-                  (print new-state)
-                  (reset! state new-state)))
+    (if (:your-turn? mp)
+      (do (swap! multiplayer update :your-turn? not)
+         (chsk-send! [::place-stone (merge mp {:location [x y]})]
+                     ws-timeout
+                     (fn [new-state]
+                       (print new-state)
+                       (reset! state new-state)))))
     (swap! state logic/handle-new-stone x y)))
 
 ;; Frontend
@@ -134,7 +139,12 @@
          locations :stone-locations} @state]
     [:svg {:viewBox [0 0 (dec size) (dec size)]
            :overflow "visible"
-           :style {"--current-hover-icon" (color-to-hover color)}}
+           :style {"--current-hover-icon"
+                   (if-let [mp @multiplayer]
+                     (if (:your-turn? mp)
+                       (color-to-hover color)
+                       "rgba(0,0,0,0)")
+                     (color-to-hover color))}}
                                         ; Enable stone defs
      stones/defs
                                         ; Draw the board lines
@@ -199,7 +209,9 @@
                 :on-click reset-board!}]])))
 
 (defn next-player! []
-  (swap! state update :next-player-color logic/other-color))
+  (if-let [mp @multiplayer]
+    (chsk-send! [::pass {:game-code (:game-code mp)}])
+    (swap! state update :next-player-color logic/other-color)))
 
 (defn toggle-next-color []
   (let [{:keys [game-mode next-player-color]} @state]
@@ -216,7 +228,6 @@
     (when (and (= game-mode :play)
                game-started?)
       [:div
-       "Pass turn"
        [:input {:type "button"
                 :value "Pass"
                 :on-click next-player!}]
@@ -274,7 +285,11 @@
       [:br]
       [toggle-next-color]
       [reset-game]])
-   [pass]])
+   (when-let [mp @multiplayer]
+     [:h5 "You are playing as " (:color mp)]
+     (if (:your-turn? mp)
+       [pass]
+       [:h5 "Waiting for other player"]))])
 
 (defn ^:dev/after-load start []
   (.log js/console "Starting app")
