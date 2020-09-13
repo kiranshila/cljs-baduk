@@ -6,11 +6,21 @@
             [clojure.set :as set]
             [cljs.core.async :as a]
             [taoensso.sente :as sente :refer [cb-success?]]
-            [taoensso.sente.packers.transit :as sente-transit]
-            [ajax.core :as ajax])
+            [taoensso.sente.packers.transit :as sente-transit])
   (:require-macros
    [cljs.core.async.macros :refer [go go-loop]]))
 
+(defonce multiplayer (r/atom nil))
+
+(defonce state (r/atom {:board-size nil
+                        :next-player-color :black
+                        :game-history []
+                        :game-started? nil
+                        :game-mode :play
+                        :stone-locations {}
+                        :last-stone-locations nil
+                        :captured {:white 0
+                                   :black 0}}))
 (def ?csrf-token
   (when-let [el (.getElementById js/document "sente-csrf-token")]
     (.getAttribute el "data-csrf-token")))
@@ -30,6 +40,12 @@
   (def chsk-send! send-fn)
   (def chsk-state state))
 
+(defmulti push-event-handler first)
+(defmethod push-event-handler :baduk.server/new-state
+   [[id payload]]
+  (let [{new-state :state} payload]
+    (reset! state new-state)))
+
 (defmulti -event-msg-handler
   "Multimethod to handle Sente `event-msg`s"
   :id ; Dispatch on event-id
@@ -47,7 +63,8 @@
 
 (defmethod -event-msg-handler :chsk/recv
   [{:as ev-msg :keys [?data]}]
-  (println "Push event from server: %s" ?data))
+  (println "Push event from server: " ?data)
+  (push-event-handler ?data))
 
 (defmethod -event-msg-handler :chsk/handshake
   [{:as ev-msg :keys [?data]}]
@@ -70,28 +87,6 @@
 (def color-to-hover {:white "url(#white-stone-image)"
                      :black "url(#black-stone-image)"})
 
-(defonce multiplayer (r/atom nil))
-
-(defonce state (r/atom {:board-size nil
-                        :next-player-color :black
-                        :game-history []
-                        :game-started? nil
-                        :game-mode :play
-                        :stone-locations {}
-                        :last-stone-locations nil
-                        :captured {:white 0
-                                   :black 0}}))
-
-(defn post
-  "POST to the server, transit all the way, do async things, give CSRF token"
-  [endpoint params]
-  (let [chan (a/chan)]
-    (ajax/POST endpoint
-      {:handler #(go (a/>! chan %))
-       :params params
-       :headers {:x-csrf-token ?csrf-token}
-       :response-format :transit})
-    chan))
 
 (defn request-new-game! []
   (let [board-size (int (.. js/document
@@ -103,7 +98,8 @@
     (chsk-send! [::new-game {:board-size board-size
                              :starting-color starting-color}]
                 ws-timeout
-                (fn [{:keys [mp s]}]
+                (fn [{mp :multiplayer
+                      s :state}]
                   (reset! multiplayer mp)
                   (reset! state s)))))
 
@@ -270,14 +266,15 @@
    [start-game]
    [goban]
    [:br]
-   (when-let [mp @multiplayer]
-     [:h4 "Game Code: " (:game-code mp)])
-   [:br]
-   [toggle-game-mode]
-   [:br]
-   [toggle-next-color]
-   [pass]
-   [reset-game]])
+   (if-let [mp @multiplayer]
+     [:h4 "Game Code: " (:game-code mp)]
+     [:div
+      [:br]
+      [toggle-game-mode]
+      [:br]
+      [toggle-next-color]
+      [reset-game]])
+   [pass]])
 
 (defn ^:dev/after-load start []
   (.log js/console "Starting app")

@@ -6,10 +6,7 @@
             [reitit.core :as r]
             [reitit.ring :as ring]
             ; Content-Type Negotiation and Coercion
-            [reitit.ring.coercion :as rrc]
             [muuntaja.core :as m]
-            [reitit.coercion.spec]
-            [reitit.coercion :as coercion]
             ; Middlewares
             [reitit.ring.middleware.exception :as exception]
             [reitit.ring.middleware.muuntaja :as muuntaja]
@@ -61,7 +58,9 @@
 (let [packer (sente-transit/get-transit-packer)
       {:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]} (sente/make-channel-socket-server!
-                                                          (get-sch-adapter) {:packer packer})]
+                                                          (get-sch-adapter) {:packer packer
+                                                                             :user-id-fn (fn [ring-req]
+                                                                                           (:client-id ring-req))})]
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
   (def ch-chsk                       ch-recv) ; ChannelSocket's receive channel
@@ -81,6 +80,7 @@
     (println "New Stone Event from: " client-id " at location " location " for game-code " game-code)
     (when ?reply-fn
       (swap! games update game-code logic/handle-new-stone x y)
+      (chsk-send! (first (disj (@game-sessions game-code) client-id)) [::new-state {:state (@games game-code)}])
       (?reply-fn (@games game-code)))))
 
 (defmethod -handle-ws-event :baduk.core/join-game [{:as ev-msg :keys [?data ?reply-fn client-id]}]
@@ -96,7 +96,7 @@
 (defmethod -handle-ws-event :baduk.core/new-game [{:as ev-msg :keys [?data ?reply-fn client-id]}]
   (let [{:keys [starting-color board-size]} ?data]
     (when ?reply-fn
-      (?reply-fn (init-game board-size starting-color client-id)))))
+      (?reply-fn (init-game! board-size starting-color client-id)))))
 
 (defn handle-ws-event [{:as ev-msg :keys [id ?data event]}]
   (-handle-ws-event ev-msg))
@@ -123,7 +123,6 @@
            [:div {:id "app"}]
            (page/include-js "js/main.js")])})
 
-
 (def app
   (ring/ring-handler
    (ring/router
@@ -131,10 +130,7 @@
      ["/chsk" {:get ring-ajax-get-or-ws-handshake
                :post ring-ajax-post}]]
     {:data {:muuntaja m/instance
-            :coercion reitit.coercion.spec/coercion
             :middleware [muuntaja/format-middleware
-                         rrc/coerce-request-middleware
-                         rrc/coerce-response-middleware
                          anti-forgery/wrap-anti-forgery
                          not-modified/wrap-not-modified
                          params/wrap-params
