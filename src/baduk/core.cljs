@@ -16,6 +16,9 @@
     (.getAttribute el "data-csrf-token")))
 
 ;; WS Setup
+
+(def ws-timeout 5000)
+
 (let [{:keys [chsk ch-recv send-fn state]}
       (sente/make-channel-socket-client!
        "/chsk"
@@ -26,6 +29,38 @@
   (def ch-chsk    ch-recv)
   (def chsk-send! send-fn)
   (def chsk-state state))
+
+(defmulti -event-msg-handler
+  "Multimethod to handle Sente `event-msg`s"
+  :id ; Dispatch on event-id
+  )
+
+(defn event-msg-handler
+  "Wraps `-event-msg-handler` with logging, error catching, etc."
+  [{:as ev-msg :keys [id ?data event]}]
+  (-event-msg-handler ev-msg))
+
+(defmethod -event-msg-handler
+  :default ; Default/fallback case (no other matching handler)
+  [{:as ev-msg :keys [event]}]
+  (println "Unhandled event: %s" event))
+
+(defmethod -event-msg-handler :chsk/recv
+  [{:as ev-msg :keys [?data]}]
+  (println "Push event from server: %s" ?data))
+
+(defmethod -event-msg-handler :chsk/handshake
+  [{:as ev-msg :keys [?data]}]
+  (let [[?uid ?csrf-token ?handshake-data] ?data]
+    (println "Handshake: %s" ?data)))
+
+(defonce router_ (atom nil))
+(defn  stop-router! [] (when-let [stop-f @router_] (stop-f)))
+(defn start-router! []
+  (stop-router!)
+  (reset! router_
+          (sente/start-client-chsk-router!
+           ch-chsk event-msg-handler)))
 
 ;; Game stuff
 
@@ -65,10 +100,35 @@
         starting-color (keyword (.. js/document
                                     (getElementById "start-color")
                                     -value))]
-    (go (let [{game :game} (a/<! (post "/new-game" {:board-size board-size
-                                            :starting-color starting-color}))]
-          (reset! multiplayer (:multiplayer game))
-          (reset! state (:state game))))))
+    (chsk-send! [::new-game {:board-size board-size
+                             :starting-color starting-color}]
+                ws-timeout
+                (fn [{:keys [mp s]}]
+                  (reset! multiplayer mp)
+                  (reset! state s)))))
+
+(defn join-game! []
+  (let [game-code (.. js/document
+                      (getElementById "game-code")
+                      -value)]
+    (chsk-send! [::join-game {:game-code game-code}]
+                ws-timeout
+                (fn [reply]
+                  (if (:join? reply)
+                    (do
+                      (reset! state (:state reply))
+                      (reset! multiplayer {:game-code game-code
+                                           :color :black}))
+                    (js/alert "No valid game code"))))))
+
+(defn new-stone-action! [x y]
+  (if-let [mp @multiplayer]
+    (chsk-send! [::place-stone (merge mp {:location [x y]})]
+                ws-timeout
+                (fn [new-state]
+                  (print new-state)
+                  (reset! state new-state)))
+    (swap! state logic/handle-new-stone x y)))
 
 ;; Frontend
 
@@ -100,7 +160,7 @@
                             :height 1
                             :x (- x 0.5)
                             :y (- y 0.5)
-                            :on-click #(swap! state logic/handle-new-stone x y)}])
+                            :on-click #(new-stone-action! x y)}])
      (for [[stone color] locations]
        (stones/stone color stone))]))
 
@@ -202,14 +262,16 @@
        [:br]
        [:br]
        [:div "Join game "
-        [:input {:type "text"}]]
-       [:input {:type "button" :value "Join" :id "game-code"}]])))
+        [:input {:type "text" :id "game-code"}]]
+       [:input {:type "button" :value "Join" :on-click join-game!}]])))
 
 (defn app []
   [:div
    [start-game]
    [goban]
    [:br]
+   (when-let [mp @multiplayer]
+     [:h4 "Game Code: " (:game-code mp)])
    [:br]
    [toggle-game-mode]
    [:br]
@@ -219,6 +281,7 @@
 
 (defn ^:dev/after-load start []
   (.log js/console "Starting app")
+  (start-router!)
   (rdom/render [app] (.getElementById js/document "app")))
 
 (defn ^:export main []

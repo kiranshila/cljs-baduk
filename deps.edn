@@ -6,7 +6,9 @@
         org.clojure/clojure {:mvn/version "1.10.1" }
         metosin/reitit {:mvn/version "0.5.5"}
         cljs-ajax/cljs-ajax {:mvn/version "0.8.1"}
-        com.taoensso/sente {:mvn/version "1.15.0"}
+        com.taoensso/sente {:mvn/version "1.16.0-RC1"}
+        com.cognitect/transit-cljs {:mvn/version "0.8.264"}
+        com.cognitect/transit-clj {:mvn/version "1.0.324"}
         ring/ring {:mvn/version "1.8.1"}
         ring/ring-defaults {:mvn/version "0.3.2"}
         hiccup/hiccup {:mvn/version "1.0.5"}}}

@@ -26,7 +26,13 @@
             [taoensso.sente.server-adapters.http-kit :refer [get-sch-adapter]]
             ; Hiccup Rendering
             [hiccup.page :as page]
-            [hiccup.core :as hiccup]))
+            [hiccup.core :as hiccup]
+            ; Core Async
+            [clojure.core.async :as a]))
+
+(def games (atom {}))
+(def game-sessions (atom {}))
+(def all-the-sessions (atom {}))
 
 (defn random-letter []
   (char (+ (rand-int 26) 65)))
@@ -34,11 +40,25 @@
 (defn gen-game-code []
   (apply str (repeatedly 6 random-letter)))
 
-(def games (atom {}))
-(def all-the-sessions (atom {}))
+(defn init-game! [board-size starting-color client-id]
+  (let [game-code (gen-game-code)
+        state {:board-size board-size
+               :next-player-color :black
+               :game-history []
+               :game-started? true
+               :game-mode :play
+               :stone-locations {}
+               :last-stone-locations nil
+               :captured {:white 0
+                          :black 0}}
+        multiplayer {:color starting-color
+                     :game-code game-code}]
+    (swap! game-sessions assoc game-code #{client-id})
+    (swap! games assoc game-code state)
+    {:state state :multiplayer multiplayer}))
 
 ;; WS Stuff
-(let [packer :edn
+(let [packer (sente-transit/get-transit-packer)
       {:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]} (sente/make-channel-socket-server!
                                                           (get-sch-adapter) {:packer packer})]
@@ -48,6 +68,45 @@
   (def chsk-send!                    send-fn) ; ChannelSocket's send API fn
   (def connected-uids                connected-uids) ; Watchable, read-only atom
   )
+
+(defmulti -handle-ws-event :id)
+
+(defmethod -handle-ws-event :default [{:as ev-msg :keys [event ?data ring-req]}]
+  (let [session (:session ring-req)
+        uid (:uid session)]))
+
+(defmethod -handle-ws-event :baduk.core/place-stone [{:as ev-msg :keys [?data ?reply-fn client-id]}]
+  (let [{:keys [location game-code color]} ?data
+        [x y] location]
+    (println "New Stone Event from: " client-id " at location " location " for game-code " game-code)
+    (when ?reply-fn
+      (swap! games update game-code logic/handle-new-stone x y)
+      (?reply-fn (@games game-code)))))
+
+(defmethod -handle-ws-event :baduk.core/join-game [{:as ev-msg :keys [?data ?reply-fn client-id]}]
+  (let [{:keys [game-code]} ?data]
+    (when ?reply-fn
+      (when-let [state (@games game-code)]
+        (if (= (count (@game-sessions game-code)) 1)
+          (do
+            (swap! game-sessions update game-code conj client-id)
+            (?reply-fn {:join? true :state state}))
+          (?reply-fn {:join? false}))))))
+
+(defmethod -handle-ws-event :baduk.core/new-game [{:as ev-msg :keys [?data ?reply-fn client-id]}]
+  (let [{:keys [starting-color board-size]} ?data]
+    (when ?reply-fn
+      (?reply-fn (init-game board-size starting-color client-id)))))
+
+(defn handle-ws-event [{:as ev-msg :keys [id ?data event]}]
+  (-handle-ws-event ev-msg))
+
+(defonce ws-router (atom nil))
+(defn start-router! []
+  (reset! ws-router
+          (sente/start-server-chsk-router! ch-chsk handle-ws-event)))
+
+;; Backend
 
 (defn index [req]
   {:status 200
@@ -64,33 +123,11 @@
            [:div {:id "app"}]
            (page/include-js "js/main.js")])})
 
-(defn init-game [board-size starting-color]
-  (let [game-code (gen-game-code)
-        state {:board-size board-size
-               :next-player-color :black
-               :game-history []
-               :game-started? true
-               :game-mode :play
-               :stone-locations {}
-               :last-stone-locations nil
-               :captured {:white 0
-                          :black 0}}
-        multiplayer {:your-color starting-color
-                     :game-code game-code}]
-    (swap! games assoc game-code state)
-    {:state state :multiplayer multiplayer}))
 
 (def app
   (ring/ring-handler
    (ring/router
     [["/" {:get index}]
-     ["/new-game"
-      {:post {:parameters {:body {:starting-color keyword?
-                                  :board-size integer?}}
-              :response {200 {:body {:game map?}}}
-              :handler (fn [{{{:keys [board-size starting-color]} :body} :parameters}]
-                        {:status 200
-                         :body {:game (init-game board-size starting-color)}})}}]
      ["/chsk" {:get ring-ajax-get-or-ws-handshake
                :post ring-ajax-post}]]
     {:data {:muuntaja m/instance
@@ -113,3 +150,4 @@
   (server/run-server #'app {:port port, :join? false}))
 
 (defonce server (start 4000))
+(start-router!)
